@@ -1,0 +1,222 @@
+---
+title: "Data Reanalysis Assignment Rmd [Curtis / Nov 10, 2016]"
+output: html_document
+---
+```{R}
+knitr::opts_chunk$set(
+    echo=TRUE,
+    warning=FALSE,
+    comment="##",
+    prompt=FALSE,
+    tidy=TRUE,
+    tidy.opts=list(width.cutoff=75),
+    fig.path="img/"
+)
+```
+<head>
+
+<meta charset="utf-8">
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="generator" content="pandoc" />
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<style>
+body {
+  box-sizing: border-box;
+  min-width: 200px;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 45px;
+  padding-top: 0px;
+}
+</style>
+
+</head>
+
+<body>
+
+<h1 id="data-reanalysis-assignment">Data Reanalysis Assignment</h1>
+<h2 id="description-of-original-paper">Description of Original Paper</h2>
+<p> This is a data reanalysis of "The Influence of Maximum Running Speed on Eye Size: A Test of Leuckart's Law in Mammals" (Heard-Booth & Kirk, 2012). The goal of this paper is to examine the relationship among axial eye diamater (measure of absolute eye size), and several related factors including maximum running speed, body mass, and activity pattern. Overall, the authors are looking for evidence of whether Leuckart's Law (which states, "animals capable of achieving fast locomotor speeds require large eyes to enhance visual acuity and avoid collisions with environmental obstacles") can be applied to mammals. The data for this study was pulled from various published sources and is presented in the form of species averages (n=50); the variables examined include axial eye diameter (mm), body mass (kg), maximum running speed (km/hr), in addition to a categorical variable of activity pattern. Relationships among the first three variables are analyzed using both ordinary least squares regressions and phylogenetic generalized least squares regressions. The Bininda-Emonds, 2008 phylogenetic tree is utilized for the latter. I will be replicating all regressions that were run in the paper. These include OLS and PGLS on each pair-wise comparison (e.g., AD~BM, AD~MRS, MRS~BM), as well as a multiple regression (wherein both MRS and BM are treated as predictor variables) and a partial phylogenetic regression of AD~MRS while holding BM constant. I have also replicated all plots published in the paper (published plots are included in this Rmd for comparison). Finally, for a descriptive analysis, I replicate the three Wilcoxon Rank-Sums tests in which differences in eye diameter and body mass are examined among activity patterns. 
+
+<h3 id="initial-steps">Initial Steps: Loading R Packages</h3>
+<p> Let's begin our journey! The first thing we need to do is load all the packages we will be using (Note: I'm using several packages that were not used by the authors because I'm a maverick that way, and I like these packages better.) Prior to calling these packages, obviously make sure they are installed. I didn't include that step in my R chunk because it freaks out "The Knitter."
+![](C:\Users\EmmaKristina\Documents\R Working Directory\Applied Data Analysis - Replication Project\img\theknitter.jpg)
+```{R}
+library(ape)
+library(caper)
+library(ggplot2)
+library(car)
+library(coin)
+```
+
+<h3 id="initial-steps">Initial Steps: Importing/Formatting Phylogenetic Tree and Dataset</h3>
+<p> In the below code I first read in the Nexus file for the phylogenetic tree that I will be using for the analysis (in this case: Bininda-Emonds, 2008). The initial object 'trees3' includes three separate versions of the tree (lower dates, best dates, and upper dates). I am only interested in using the 'bestDates' version, so I subset that tree out and assign it to the object 'tree'
+```{R}
+trees3<-read.nexus("C:/Users/EmmaKristina/Desktop/tree.txt")
+head(trees3)
+summary(trees3)
+tree<-trees3$mammalST_bestDates
+plot(tree) #This is clearly a giant clusterf**k but it at least shows that this object does in fact contain only one tree
+```
+<p> Next I read in my dataset, which I have saved as a .csv file. I set stringsAsFactors equal to TRUE so that I can later run Wilcoxon Rank-Sum tests comparing activity patterns (classified as "d", "n", and "c" for diurnal, nocturnal, and cathemeral). All regressions in this paper are based on log10 transformed data. Rather than transforming the data within the regression equations, I create three new variables and bind them to my original dataset.
+```{R}
+data<-read.csv("C:/Users/EmmaKristina/Desktop/Heard-Booth&Kirk_2012_data.csv",header=TRUE,sep = ",",stringsAsFactors = TRUE)
+head(data)
+logBM<-log10(data$BM)
+logAD<-log10(data$AD)
+logMRS<-log10(data$MRS)
+data<-data.frame(cbind(data,logBM,logAD,logMRS))
+names(data)<-c("Order","Family","Genus.species","BM","AD","MRS","ACT","logBM","logAD","logMRS")
+data$Genus.species<-gsub(" ", "_", data$Genus.species)# Matching the format of species' names in the data table to that in the Nexus file. This step will be necessary for running pgls in caper
+head(data)
+
+```
+<p> The next chunk is not actually necessary for running pgls in caper as that package automatically trims you phylo tree to include only the species in your dataset. That being said, I'd already done this pruning shindig before I realized that so I'm leaving it in. It also allows for nice visualization of the tree for the subset of mammals this paper is analysing.
+```{R}
+species<-c("Aepyceros_melampus","Alcelaphus_buselaphus","Antilope_cervicapra","Bison_bison","Connochaetes_gnou","Hippotragus_equinus","Taurotragus_oryx","Alces_alces","Cervus_elaphus","Dama_dama","Odocoileus_hemionus","Odocoileus_virginianus","Giraffa_camelopardalis","Canis_lupus","Urocyon_cinereoargenteus","Vulpes_vulpes","Acinonyx_jubatus","Panthera_leo","Panthera_tigris","Crocuta_crocuta","Meles_meles","Procyon_lotor","Ursus_americanus","Ursus_arctos","Dasyurus_viverrinus","Didelphis_marsupialis","Didelphis_virginiana","Bettongia_penicillata","Lepus_californicus","Sylvilagus_audubonii","Diceros_bicornis","Equus_burchellii","Equus_caballus","Equus_zebra","Cebus_capucinus","Erythrocebus_patas","Gorilla_gorilla","Elephas_maximus","Loxodonta_africana","Microtus_pennsylvanicus","Peromyscus_maniculatus","Zapus_hudsonius","Erethizon_dorsatum","Myoxus_glis","Rattus_rattus","Marmota_monax","Sciurus_carolinensis","Sciurus_niger","Tamias_striatus","Tamiasciurus_hudsonicus") 
+str(species)
+pruned.tree<-drop.tip(tree,setdiff(tree$tip.label,species))
+write.tree(pruned.tree)
+plot(pruned.tree,cex = 0.7)
+```
+<h3 id="regression-statistics">Ordinary Least Squares and Phylogenetic Least Squares Regressions</h3>
+
+<p>The following regression statistics are looking at the linear relationships among the three (log-transformed--from here on out just assume that's implied) variables: body mass ('logBM'), axial eye diameter ('logAD'), and maximum running speed ('logMRS'). They are analysed first in a pair-wise fashion first using ordinary least squares regressions, then using phylogenetic generalized least squares regressions in order to examine the effect of phylogenetic inertia (i.e., similarity due to shared ancestry) on the observed relationships. PGLS does this by essentially adding an error term to the least squares regression which corrects for phylogenetic non-independence. Specifically, we are setting the parameters of the PGLS regression to use a maximum likelihood approach to estimate Pagel's lambda. [Note: my PGLS results differ a bit from those in the paper, particularly in the magnitude of the AIC values. This is likely due to the fact that I am running my PGLS regressions using <strong><em>caper</em></strong> rather than <strong><em>ape</em></strong>. However, the relationships among the AIC values-in terms of which is lowest, highest, etc-still matches the results of the paper.]
+<p> In addition to these pair-wise regressions, the authors also run a multiple regression to examine the combined effect of body mass and maximum running speed on axial eye diameter. Finally, they run a partial phylogenetic regression on the residuals of the PGLS models for axial diameter on body mass and maximum running speed on body mass. This provides a means for examining the effect of running speed on eye diameter when body mass is held constant. 
+<p> Below is the table of results provided in the paper for comparison:
+
+![](C:\Users\EmmaKristina\Documents\R Working Directory\Applied Data Analysis - Replication Project\img\results.jpg)
+
+
+```{R}
+
+myobject<- comparative.data(phy = tree, data = data, names.col = Genus.species, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE) #This creates the object that 'caper' will use to run the PGLS
+
+summary(myobject$dropped) #checking to make sure none of my rows of data were dropped
+str(myobject) #Checking out the object's structure just for shits and giggles
+```
+
+
+<h4 id="lodAD~logMRS">Log10 Axial Eye Diameter ~ Log10 Max Running Speed</h4>
+
+```{R}
+olsModel1<-lm(logAD~logMRS,data = data)
+summary(olsModel1)
+
+model.pgls1<-pgls(log10(AD)~log10(MRS), data = myobject, lambda='ML')
+summary(model.pgls1)
+model.pgls1$aic
+```
+<p> Below we can compare the published plot of the models with my plot: (Look pretty similar!)
+
+![](C:\Users\EmmaKristina\Documents\R Working Directory\Applied Data Analysis - Replication Project\img\logADvlogMRS.jpg)
+
+```{R}
+##Plot of logAD ~ logMRS
+
+as.factor(data$order)
+p1<-ggplot(data = data, aes(x = logMRS, y = logAD)) + geom_point(aes(color = factor(Order))) + scale_color_manual(values = c("blue", "pink","lightblue","lightblue","lightblue","green","gray","yellow","black","orange")) + geom_abline(slope = olsModel1$coefficients[2], intercept = olsModel1$coefficients[1], color = "black")+xlab("Log10 Maximum Running Speed")+ylab("Log10 Axial Eye Diameter") + geom_abline(slope=model.pgls1$model$coef[2],intercept = model.pgls1$model$coef[1], color="orange")+theme_bw()
+p1
+```
+<h4 id="lodAD~logBM">Log10 Axial Eye Diameter ~ Log10 Body Mass</h4>
+
+```{R}
+olsModel2<-lm(logAD~logBM,data = data)
+summary(olsModel2)
+
+model.pgls2<-pgls(log10(AD)~log10(BM), data = myobject, lambda='ML')
+summary(model.pgls2)
+model.pgls2$aic
+```
+<p> Compare the plots: 
+
+![](C:\Users\EmmaKristina\Documents\R Working Directory\Applied Data Analysis - Replication Project\img\logADvlogBM.jpg)
+```{R}
+##Plot of logAD ~ logBM
+
+p2<-ggplot(data = data, aes(x = logBM, y = logAD)) + geom_point(aes(color = factor(Order))) + scale_color_manual(values = c("blue", "pink","lightblue","lightblue","lightblue","green","gray","yellow","black","orange")) + geom_abline(slope = olsModel2$coefficients[2], intercept = olsModel2$coefficients[1], color = "black")+xlab("Log10 Body Mass")+ylab("Log10 Axial Eye Diameter") + geom_abline(slope=model.pgls2$model$coef[2],intercept = model.pgls2$model$coef[1], color="orange")+theme_bw()
+p2
+```
+<h4 id="lodMRS~logBM">Log10 Maximum Running Speed ~ Log10 Body Mass</h4>
+```{R}
+#Log10 Max Running Speed ~ Log10 Body Mass
+
+olsModel3<-lm(logMRS~logBM,data = data)
+summary(olsModel3)
+
+model.pgls3<-pgls(logMRS~logBM, data = myobject, lambda='ML')
+summary(model.pgls3)
+model.pgls3$aic
+```
+<p> Pretty plots looking the same!:
+
+![](C:\Users\EmmaKristina\Documents\R Working Directory\Applied Data Analysis - Replication Project\img\logMRSvlogBM.jpg)
+```{R}
+##Plot of logMRS ~ logBM
+
+p3<-ggplot(data = data, aes(x = logBM, y = logMRS)) + geom_point(aes(color = factor(Order))) + scale_color_manual(values = c("blue", "pink","lightblue","lightblue","lightblue","green","gray","yellow","black","orange")) + geom_abline(slope = olsModel3$coefficients[2], intercept = olsModel3$coefficients[1], color = "black")+xlab("Log10 Body Mass")+ylab("Log10 Max Running Speed") + geom_abline(slope=model.pgls3$model$coef[2],intercept = model.pgls3$model$coef[1], color="orange")+theme_bw()
+p3
+```
+
+<h4 id="multreg">Multiple Regression: Log10 Axial Eye Diameter ~ Log10 Body Mass + Log10 Max Running Speed</h4>
+
+```{R}
+olsModel4<-lm(logAD~logBM*logMRS,data = data) #Also testing for effect of interaction b/w BM and MRS
+summary(olsModel4)
+
+anovaModel4<-car::Anova(olsModel4,type = 2) #Since the interaction was not significant, I am using a Type II ANOVA. From this I will extract the sum of squares values in order to calculate the partial R-quared values
+print(anovaModel4)
+BM_partialR2<-anovaModel4[1,1] / sum(anovaModel4$`Sum Sq`)
+BM_partialR2
+MRS_partialR2<-anovaModel4[2,1] / sum(anovaModel4$`Sum Sq`)
+MRS_partialR2
+#These partial R squared values do not match those in the paper. Not sure why this is, but they also don't specify the way in which they generated their partial R^2 values.
+
+model.pgls4<-pgls(logAD~logBM*logMRS, data = myobject, lambda='ML')
+summary(model.pgls4)
+model.pgls4$aic
+```
+
+
+<h4 id="partreg">Partial PGLS Regression: Residual Log10 Axial Eye Diameter ~ Residual Log10 Max Running Speed</h4>
+
+```{R}
+model.pgls5<-pgls(resid(model.pgls2)~resid(model.pgls3)+0, data = myobject, lambda='ML') #Trying to match the paper as closely as possible, I set the intercept equal to zero
+summary(model.pgls5)
+model.pgls5$aic
+model.pgls5$model$coef
+
+pglsorders<-read.csv("C:/Users/EmmaKristina/Desktop/pglsorders.csv",header=T, sep=",",stringsAsFactors = T)
+resid_df<-cbind.data.frame(pglsorders,resid(model.pgls2),resid(model.pgls3))
+colnames(resid_df)<-c("Order","ADresid","MRSresid")
+```
+<p> Once again we can compare the plots, which look pretty similar despite the discrepancy between my slope value and the published value (0.259).
+
+![](C:\Users\EmmaKristina\Documents\R Working Directory\Applied Data Analysis - Replication Project\img\ADresvMRSres.jpg)
+```{R}
+#Plot of AD residuals~MRS residuals
+p5<-ggplot(data = resid_df, aes(x = MRSresid, y = ADresid)) + geom_point(aes(color = factor(Order))) + xlab("Max Running Speed Residuals")+ylab("Axial Eye Diameter Residuals") + geom_abline(slope=model.pgls5$model$coef[1],intercept =0,color="orange") +xlim(c(-1,0.75))+ylim(c(-0.325,0.31))+scale_color_manual(values = c("blue", "pink","lightblue","lightblue","lightblue","green","gray","yellow","black","orange"))+theme_bw()
+p5
+```
+
+<h3 id="wilcoxon">Wilcoxon Rank-Sums Tests</h3>
+<p> The following utilizes Wilcoxon Rank-Sums to examine the variation in eye diameter and body mass among the three activity pattern groups: diurnal, nocturnal, and cathemeral. 
+```{R}
+#Diurnal vs. Nocturnal-->Not statistically significant difference
+actd<-data$ACT=="d"
+diurnal<- data[actd,]
+actn<-data$ACT=="n"
+nocturnal<-data[actn,]
+DvN<-rbind(diurnal,nocturnal)
+coin::wilcox_test(AD~ACT,data=DvN,distribution="exact")
+
+#Cathemeral vs. Combined Diurnal and Nocturnal--> Statistically significant differences
+DvN$ACT[DvN$ACT=="n"]<-"d"
+actc<-data$ACT=="c"
+cathemeral<-data[actc,]
+DNvC<-rbind(DvN,cathemeral)
+coin::wilcox_test(AD~ACT,data=DNvC,distribution="exact") #Published results:(p<0.001, Z=-3.65)
+coin::wilcox_test(BM~ACT,data=DNvC,distribution="exact")#Published results:(p<0.001, Z=-3.87)
+
+```
